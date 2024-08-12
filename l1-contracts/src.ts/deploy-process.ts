@@ -83,6 +83,7 @@ export async function novaUpgradeDeployment(deployer: Deployer, gasPrice: BigNum
   await deployer.deployValidatorTimelock(create2Salt, { gasPrice });
 
   await deployer.deployChainAdmin(create2Salt, { gasPrice });
+  await deployer.deployTransparentProxyAdmin(create2Salt, { gasPrice });
 
   await deployer.deployBridgehubContract(create2Salt, gasPrice);
 

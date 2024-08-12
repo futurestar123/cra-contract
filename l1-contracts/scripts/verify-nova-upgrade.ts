@@ -37,6 +37,7 @@ async function main() {
   await verifyValidatorTimelock(addresses.ValidatorTimeLock, ownerAddress);
 
   await verifyPromise(addresses.ChainAdmin, [ownerAddress]);
+  await verifyPromise(addresses.TransparentProxyAdmin);
 
   // bridgehub
   await verifyBridgeHub(addresses, ownerAddress);
