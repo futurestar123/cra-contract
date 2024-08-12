@@ -1,19 +1,19 @@
 // hardhat import should be the first import in the file
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-import * as hardhat from "hardhat";
 import { Command } from "commander";
-import type { BigNumber } from "ethers";
 import { ethers } from "ethers";
 import * as fs from "fs";
-import { web3Url } from "zk/build/utils";
+import { web3Url } from "../scripts/utils";
 import { deployViaCreate2 } from "../src.ts/deploy-utils";
 import { getFacetCutsForUpgrade } from "../src.ts/diamondCut";
-import { insertGasPrice } from "./utils";
-import { ethTestConfig } from "../src.ts/utils";
+import { ethTestConfig, getNumberFromEnv } from "../src.ts/utils";
+import { parseUnits } from "ethers/lib/utils";
 
 async function deployFacetCut(
   wallet: ethers.Wallet,
   name: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  args: any[],
   create2Address: string,
   // eslint-disable-next-line @typescript-eslint/ban-types
   ethTxOptions: {},
@@ -22,7 +22,7 @@ async function deployFacetCut(
   create2Salt = create2Salt ?? ethers.constants.HashZero;
 
   ethTxOptions["gasLimit"] = 10_000_000;
-  const [address, txHash] = await deployViaCreate2(wallet, name, [], create2Salt, ethTxOptions, create2Address, true);
+  const [address, txHash] = await deployViaCreate2(wallet, name, args, create2Salt, ethTxOptions, create2Address, true);
 
   console.log(`Deployed ${name} at ${address} with txHash ${txHash}`);
   return [address, txHash];
@@ -35,7 +35,7 @@ async function deployFacetCuts(
   file?: string,
   privateKey?: string,
   nonce?: number,
-  gasPrice?: BigNumber,
+  gasPrice?: string,
   create2Salt?: string
 ) {
   const provider = new ethers.providers.JsonRpcProvider(l1Rpc);
@@ -47,17 +47,17 @@ async function deployFacetCuts(
       ).connect(provider);
   const deployedFacets = {};
   const ethTxOptions = {};
-  if (!nonce) {
-    ethTxOptions["nonce"] = await wallet.getTransactionCount();
-  } else {
-    ethTxOptions["nonce"] = nonce;
-  }
-  if (!gasPrice) {
-    await insertGasPrice(provider, ethTxOptions);
-  }
+  ethTxOptions["nonce"] = nonce ?? (await wallet.getTransactionCount());
+  ethTxOptions["gasPrice"] = gasPrice ? parseUnits(gasPrice, "gwei") : await provider.getGasPrice();
   for (let i = 0; i < names.length; i++) {
-    const [address, txHash] = await deployFacetCut(wallet, names[i], create2Address, ethTxOptions, create2Salt);
-    ethTxOptions["nonce"] += 1;
+    let args = [];
+    if (names[i] === "MailboxFacet") {
+      args = [getNumberFromEnv("CONTRACTS_ERA_CHAIN_ID")];
+    }
+    const [address, txHash] = await deployFacetCut(wallet, names[i], args, create2Address, ethTxOptions, create2Salt);
+    if (txHash !== ethers.constants.HashZero) {
+      ethTxOptions["nonce"] += 1;
+    }
     deployedFacets[names[i]] = { address, txHash };
   }
   console.log(JSON.stringify(deployedFacets, null, 2));

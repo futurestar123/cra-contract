@@ -38,7 +38,7 @@ class PublishReporter {
   // Each promise will return either string with error or null denoting success.
   pendingPromises: Promise<TransactionReport>[] = [];
 
-  async appendPublish(bytecodes: BytesLike[], deployer: Deployer, transaction: types.PriorityOpResponse) {
+  async appendPublish(bytecodes: BytesLike[], deployer: Deployer, transaction: types.TransactionResponse) {
     const waitAndDoubleCheck = async () => {
       // Waiting for the transaction to be processed by the server
       await transaction.wait();
@@ -97,10 +97,9 @@ class ZkSyncDeployer {
       return;
     }
 
-    const priorityOpHandle = await publishFactoryDeps(dependencies, this.deployer, this.nonce, this.gasPrice);
+    const priorityOpHandle = await publishFactoryDeps(dependencies, this.deployer, this.gasPrice);
 
     await this.reporter.appendPublish(getBytecodes(dependencies), this.deployer, priorityOpHandle);
-    this.nonce += 1;
   }
 
   // Returns the current default account bytecode on zkSync

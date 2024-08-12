@@ -82,7 +82,9 @@
     "set-gateway": "ts-node scripts/set-gateway.ts",
     "set-admin": "ts-node scripts/set-admin.ts",
     "deploy-l1-erc20-bridge-imple": "ts-node scripts/deploy-l1-erc20-bridge-impl.ts",
-    "replace-tx": "ts-node scripts/replace-tx.ts"
+    "replace-tx": "ts-node scripts/replace-tx.ts",
+    "nova-upgrade": "ts-node scripts/nova-upgrade.ts",
+    "verify-nova-upgrade": "hardhat run --network env scripts/verify-nova-upgrade.ts"
   },
   "dependencies": {
     "dotenv": "^16.0.3",

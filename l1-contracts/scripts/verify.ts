@@ -1,5 +1,6 @@
 // hardhat import should be the first import in the file
 import * as hardhat from "hardhat";
+import type { DeployedAddresses } from "../src.ts/deploy-utils";
 import { deployedAddressesFromEnv } from "../src.ts/deploy-utils";
 import { getNumberFromEnv, getHashFromEnv, getAddressFromEnv } from "../src.ts/utils";
 
@@ -11,7 +12,7 @@ import { getTokens } from "../src.ts/deploy-token";
 
 const provider = web3Provider();
 
-function verifyPromise(
+export function verifyPromise(
   address: string,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructorArguments?: Array<any>,
@@ -30,6 +31,82 @@ function verifyPromise(
       .then(() => resolve(`Successfully verified ${address}`))
       .catch((e) => reject(`Failed to verify ${address}\nError: ${e.message}`));
   });
+}
+
+export async function verifyValidatorTimelock(validatorTimelock: string, ownerAddress: string) {
+  const executionDelay = getNumberFromEnv("CONTRACTS_VALIDATOR_TIMELOCK_EXECUTION_DELAY");
+  const eraChainId = getNumberFromEnv("CONTRACTS_ERA_CHAIN_ID");
+  await verifyPromise(validatorTimelock, [ownerAddress, executionDelay, eraChainId]);
+}
+
+export async function verifyBridgeHub(addresses: DeployedAddresses, ownerAddress: string) {
+  await verifyPromise(addresses.Bridgehub.BridgehubImplementation);
+  const bridgehub = new Interface(hardhat.artifacts.readArtifactSync("Bridgehub").abi);
+  const initCalldata1 = bridgehub.encodeFunctionData("initialize", [ownerAddress]);
+  await verifyPromise(addresses.Bridgehub.BridgehubProxy, [
+    addresses.Bridgehub.BridgehubImplementation,
+    addresses.TransparentProxyAdmin,
+    initCalldata1,
+  ]);
+}
+
+export async function verifyStm(addresses: DeployedAddresses, deployer: Deployer) {
+  const maxNumberOfHyperchains = getNumberFromEnv("CONTRACTS_MAX_NUMBER_OF_HYPERCHAINS");
+  await verifyPromise(addresses.StateTransition.StateTransitionImplementation, [
+    addresses.Bridgehub.BridgehubProxy,
+    maxNumberOfHyperchains,
+  ]);
+
+  const stateTransitionManager = new Interface(hardhat.artifacts.readArtifactSync("StateTransitionManager").abi);
+  const genesisBatchHash = getHashFromEnv("CONTRACTS_GENESIS_ROOT");
+  const genesisRollupLeafIndex = getNumberFromEnv("CONTRACTS_GENESIS_ROLLUP_LEAF_INDEX");
+  const genesisBatchCommitment = getHashFromEnv("CONTRACTS_GENESIS_BATCH_COMMITMENT");
+  const diamondCut = await deployer.initialZkSyncHyperchainDiamondCut([]);
+  const protocolVersion = packSemver(...unpackStringSemVer(process.env.CONTRACTS_GENESIS_PROTOCOL_SEMANTIC_VERSION));
+
+  const initCalldata2 = stateTransitionManager.encodeFunctionData("initialize", [
+    {
+      owner: addresses.Governance,
+      validatorTimelock: addresses.ValidatorTimeLock,
+      chainCreationParams: {
+        genesisUpgrade: addresses.StateTransition.GenesisUpgrade,
+        genesisBatchHash,
+        genesisIndexRepeatedStorageChanges: genesisRollupLeafIndex,
+        genesisBatchCommitment,
+        diamondCut,
+      },
+      protocolVersion,
+    },
+  ]);
+
+  await verifyPromise(addresses.StateTransition.StateTransitionProxy, [
+    addresses.StateTransition.StateTransitionImplementation,
+    addresses.TransparentProxyAdmin,
+    initCalldata2,
+  ]);
+}
+
+export async function verifyL1SharedBridge(addresses: DeployedAddresses, ownerAddress: string) {
+  const eraChainId = getNumberFromEnv("CONTRACTS_ERA_CHAIN_ID");
+  const eraDiamondProxy = getAddressFromEnv("CONTRACTS_ERA_DIAMOND_PROXY_ADDR");
+  const tokens = getTokens();
+  const l1WethToken = tokens.find((token: { symbol: string }) => token.symbol == "WETH")!.address;
+
+  await verifyPromise(addresses.Bridges.SharedBridgeImplementation, [
+    l1WethToken,
+    addresses.Bridgehub.BridgehubProxy,
+    eraChainId,
+    eraDiamondProxy,
+  ]);
+  const initCalldata4 = new Interface(hardhat.artifacts.readArtifactSync("L1SharedBridge").abi).encodeFunctionData(
+    "initialize",
+    [ownerAddress]
+  );
+  await verifyPromise(addresses.Bridges.SharedBridgeProxy, [
+    addresses.Bridges.SharedBridgeImplementation,
+    addresses.TransparentProxyAdmin,
+    initCalldata4,
+  ]);
 }
 
 // Note: running all verifications in parallel might be too much for etherscan, comment out some of them if needed
@@ -73,9 +150,7 @@ async function main() {
   //     promises.push(promise);
   // }
 
-  const executionDelay = getNumberFromEnv("CONTRACTS_VALIDATOR_TIMELOCK_EXECUTION_DELAY");
-  const eraChainId = getNumberFromEnv("CONTRACTS_ERA_CHAIN_ID");
-  await verifyPromise(addresses.ValidatorTimeLock, [deployWalletAddress, executionDelay, eraChainId]);
+  await verifyValidatorTimelock(addresses.ValidatorTimeLock, deployWalletAddress);
 
   await verifyPromise(addresses.Governance, [deployWalletAddress, ethers.constants.AddressZero, 0]);
 
@@ -88,15 +163,7 @@ async function main() {
   await verifyPromise(addresses.TransparentProxyAdmin);
 
   // bridgehub
-
-  await verifyPromise(addresses.Bridgehub.BridgehubImplementation);
-  const bridgehub = new Interface(hardhat.artifacts.readArtifactSync("Bridgehub").abi);
-  const initCalldata1 = bridgehub.encodeFunctionData("initialize", [deployWalletAddress]);
-  await verifyPromise(addresses.Bridgehub.BridgehubProxy, [
-    addresses.Bridgehub.BridgehubImplementation,
-    addresses.TransparentProxyAdmin,
-    initCalldata1,
-  ]);
+  await verifyBridgeHub(addresses, deployWalletAddress);
 
   // stm
 
@@ -112,6 +179,7 @@ async function main() {
   ]) {
     await verifyPromise(address);
   }
+  await verifyPromise(addresses.StateTransition.MailboxFacet, [getNumberFromEnv("CONTRACTS_ERA_CHAIN_ID")]);
 
   // Verify DiamondProxy, we get the real diamond cut from deploy log
   const chainId = process.env.ETH_CLIENT_CHAIN_ID;
@@ -129,33 +197,7 @@ async function main() {
   const dc = dpI.decodeEventLog("DiamondCut", log.data);
   await verifyPromise(addresses.StateTransition.DiamondProxy, [chainId, dc]);
 
-  const stateTransitionManager = new Interface(hardhat.artifacts.readArtifactSync("StateTransitionManager").abi);
-  const genesisBatchHash = getHashFromEnv("CONTRACTS_GENESIS_ROOT"); // TODO: confusing name
-  const genesisRollupLeafIndex = getNumberFromEnv("CONTRACTS_GENESIS_ROLLUP_LEAF_INDEX");
-  const genesisBatchCommitment = getHashFromEnv("CONTRACTS_GENESIS_BATCH_COMMITMENT");
-  const diamondCut = await deployer.initialZkSyncHyperchainDiamondCut([]);
-  const protocolVersion = packSemver(...unpackStringSemVer(process.env.CONTRACTS_GENESIS_PROTOCOL_SEMANTIC_VERSION));
-
-  const initCalldata2 = stateTransitionManager.encodeFunctionData("initialize", [
-    {
-      owner: addresses.Governance,
-      validatorTimelock: addresses.ValidatorTimeLock,
-      chainCreationParams: {
-        genesisUpgrade: addresses.StateTransition.GenesisUpgrade,
-        genesisBatchHash,
-        genesisIndexRepeatedStorageChanges: genesisRollupLeafIndex,
-        genesisBatchCommitment,
-        diamondCut,
-      },
-      protocolVersion,
-    },
-  ]);
-
-  await verifyPromise(addresses.StateTransition.StateTransitionProxy, [
-    addresses.StateTransition.StateTransitionImplementation,
-    addresses.TransparentProxyAdmin,
-    initCalldata2,
-  ]);
+  await verifyStm(addresses, deployer);
 
   // bridges
   await verifyPromise(addresses.Bridges.ERC20BridgeImplementation, [addresses.Bridges.SharedBridgeProxy]);
@@ -169,25 +211,7 @@ async function main() {
     initCalldata3,
   ]);
 
-  const eraDiamondProxy = getAddressFromEnv("CONTRACTS_ERA_DIAMOND_PROXY_ADDR");
-  const tokens = getTokens();
-  const l1WethToken = tokens.find((token: { symbol: string }) => token.symbol == "WETH")!.address;
-
-  await verifyPromise(addresses.Bridges.SharedBridgeImplementation, [
-    l1WethToken,
-    addresses.Bridgehub.BridgehubProxy,
-    eraChainId,
-    eraDiamondProxy,
-  ]);
-  const initCalldata4 = new Interface(hardhat.artifacts.readArtifactSync("L1SharedBridge").abi).encodeFunctionData(
-    "initialize",
-    [deployWalletAddress]
-  );
-  await verifyPromise(addresses.Bridges.SharedBridgeProxy, [
-    addresses.Bridges.SharedBridgeImplementation,
-    addresses.TransparentProxyAdmin,
-    initCalldata4,
-  ]);
+  await verifyL1SharedBridge(addresses, deployWalletAddress);
 }
 
 main()

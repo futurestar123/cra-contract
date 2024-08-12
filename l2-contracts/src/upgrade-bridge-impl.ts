@@ -11,7 +11,16 @@ import { REQUIRED_L1_TO_L2_GAS_PER_PUBDATA_LIMIT } from "zksync-web3/build/src/u
 import { web3Provider } from "../../l1-contracts/scripts/utils";
 import { getAddressFromEnv, getNumberFromEnv } from "../../l1-contracts/src.ts/utils";
 import { Deployer } from "../../l1-contracts/src.ts/deploy";
-import { awaitPriorityOps, computeL2Create2Address, create2DeployFromL1, getL1TxInfo } from "./utils";
+import {
+  applyL1ToL2Alias,
+  awaitPriorityOps,
+  computeL2Create2Address,
+  create2DeployFromL1,
+  getL1TxInfo,
+  hashL2Bytecode,
+} from "./utils";
+import { Interface } from "ethers/lib/utils";
+import { L2_STANDARD_TOKEN_PROXY_BYTECODE } from "./deploy-shared-bridge-on-l2-through-l1";
 
 const SupportedL2Contracts = ["L2SharedBridge", "L2StandardERC20", "L2WrappedBaseToken"] as const;
 
@@ -354,6 +363,89 @@ async function main() {
 
       console.log(`Base cost for priority tx with max ergs: ${ethers.utils.formatEther(neededValue)} ETH`);
     });
+
+  program
+    .command("deploy-l2-shared-bridge-implement")
+    .option("--private-key <private-key>")
+    .option("--gas-price <gas-price>")
+    .option("--create2-salt <create2-salt>")
+    .action(async (cmd) => {
+      // We deploy the target contract through L1 to ensure security
+      const chainId: string = process.env.CHAIN_ETH_ZKSYNC_NETWORK_ID;
+      const deployWallet = cmd.privateKey
+        ? new Wallet(cmd.privateKey, provider)
+        : Wallet.fromMnemonic(
+            process.env.MNEMONIC ? process.env.MNEMONIC : ethTestConfig.mnemonic,
+            "m/44'/60'/0'/0/1"
+          ).connect(provider);
+      const gasPrice = cmd.gasPrice
+        ? ethers.utils.parseUnits(cmd.gasPrice, "gwei")
+        : (await provider.getGasPrice()).mul(3).div(2);
+      const salt = cmd.create2Salt ? cmd.create2Salt : ethers.utils.hexlify(ethers.constants.HashZero);
+
+      console.log(`Using deployer wallet: ${deployWallet.address}`);
+      console.log("Gas price: ", ethers.utils.formatUnits(gasPrice, "gwei"));
+      console.log("Salt: ", salt);
+
+      const bridgeImplBytecode = getContractBytecode("L2SharedBridge");
+      const constructorInput = new ethers.utils.AbiCoder().encode(
+        ["uint256", "address"],
+        [process.env.CONTRACTS_ERA_CHAIN_ID, process.env.CONTRACTS_MERGE_TOKEN_PORTAL_ADDR]
+      );
+      const l2SharedBridgeImplAddr = computeL2Create2Address(deployWallet, bridgeImplBytecode, constructorInput, salt);
+      console.log("Bridge implementation address: ", l2SharedBridgeImplAddr);
+
+      const tx = await create2DeployFromL1(
+        chainId,
+        deployWallet,
+        bridgeImplBytecode,
+        constructorInput,
+        salt,
+        priorityTxMaxGasLimit,
+        gasPrice
+      );
+      console.log("L1 tx hash: ", tx.hash);
+
+      const receipt = await tx.wait();
+      if (receipt.status !== 1) {
+        console.error("L1 tx failed");
+        process.exit(1);
+      }
+
+      console.log("Bridge implementation has been successfully deployed!");
+      console.log("Address:", l2SharedBridgeImplAddr);
+    });
+
+  program.command("prepare-l2-erc20-bridge-upgrade").action(async () => {
+    const l2Provider = new ethers.providers.JsonRpcProvider(process.env.API_WEB3_JSON_RPC_HTTP_URL);
+    const deployWallet = Wallet.createRandom().connect(l2Provider);
+    const deployer = new Deployer({ deployWallet });
+
+    const l2ERC20Bridge = deployer.addresses.Bridges.L2SharedBridgeProxy;
+    const l2SharedBridgeImpl = deployer.addresses.Bridges.L2SharedBridgeImplementation;
+
+    const l2SharedBridgeInterface = new Interface(hre.artifacts.readArtifactSync("L2SharedBridge").abi);
+    const l2GovernorAddress = applyL1ToL2Alias(deployer.addresses.Governance);
+    const proxyInitializationParams = l2SharedBridgeInterface.encodeFunctionData("initialize", [
+      deployer.addresses.Bridges.SharedBridgeProxy,
+      deployer.addresses.Bridges.ERC20BridgeProxy,
+      hashL2Bytecode(L2_STANDARD_TOKEN_PROXY_BYTECODE),
+      l2GovernorAddress,
+    ]);
+
+    const proxyArtifact = await hre.artifacts.readArtifact("ITransparentUpgradeableProxy");
+    const proxyInterface = new ethers.utils.Interface(proxyArtifact.abi);
+
+    const l2Calldata = proxyInterface.encodeFunctionData("upgradeToAndCall", [
+      l2SharedBridgeImpl,
+      proxyInitializationParams,
+    ]);
+
+    console.log("Call target: ");
+    console.log(l2ERC20Bridge);
+    console.log("Call data: ");
+    console.log(l2Calldata);
+  });
 
   await program.parseAsync(process.argv);
 }

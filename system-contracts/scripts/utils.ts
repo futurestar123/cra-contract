@@ -127,12 +127,7 @@ export function getBytecodes(dependencies: Dependency[]): BytesLike[] {
   return dependencies.map((dep) => dep.bytecodes).flat();
 }
 
-export async function publishFactoryDeps(
-  dependencies: Dependency[],
-  deployer: Deployer,
-  nonce: number,
-  gasPrice: BigNumber
-) {
+export async function publishFactoryDeps(dependencies: Dependency[], deployer: Deployer, gasPrice: BigNumber) {
   if (dependencies.length === 0) {
     throw new Error("The dependencies must be non-empty");
   }
@@ -149,25 +144,35 @@ export async function publishFactoryDeps(
   );
   console.log(`Combined length ${combinedLength}`);
 
-  const txHandle = await deployer.zkWallet.requestExecute({
-    contractAddress: ethers.constants.AddressZero,
-    calldata: "0x",
-    l2GasLimit: DEFAULT_L2_TX_GAS_LIMIT,
-    factoryDeps: bytecodes,
-    overrides: {
-      nonce,
-      gasPrice,
-      gasLimit: 3000000,
-    },
-  });
+  const isLinea = process.env.CHAIN_ETH_NETWORK === "linea" || process.env.CHAIN_ETH_NETWORK === "lineaSepolia";
+  if (isLinea) {
+    // bytecode maybe too large to send on linea
+    return await deployer.zkWallet.sendTransaction({
+      to: ethers.constants.AddressZero,
+      customData: {
+        factoryDeps: bytecodes,
+      },
+    });
+  } else {
+    const txHandle = await deployer.zkWallet.requestExecute({
+      contractAddress: ethers.constants.AddressZero,
+      calldata: "0x",
+      l2GasLimit: DEFAULT_L2_TX_GAS_LIMIT,
+      factoryDeps: bytecodes,
+      overrides: {
+        gasPrice,
+        gasLimit: 3000000,
+      },
+    });
 
-  console.log(`Transaction hash: ${txHandle.hash}`);
+    console.log(`Transaction hash: ${txHandle.hash}`);
 
-  console.log("Waiting for transaction commit on L1");
+    console.log("Waiting for transaction commit on L1");
 
-  await txHandle.waitL1Commit(2);
+    await txHandle.waitL1Commit(2);
 
-  return txHandle;
+    return txHandle;
+  }
 }
 
 // Returns an array of bytecodes that should be published along with their total length in bytes

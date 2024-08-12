@@ -255,7 +255,7 @@ export function compileInitialCutHash(
   const factory = new DiamondInitFactory();
 
   const feeParams = {
-    pubdataPricingMode: PubdataPricingMode.Rollup,
+    pubdataPricingMode: PubdataPricingMode.Validium,
     batchOverheadL1Gas: SYSTEM_CONFIG.priorityTxBatchOverheadL1Gas,
     maxPubdataPerBatch: SYSTEM_CONFIG.priorityTxPubdataPerBatch,
     priorityTxMaxPubdata: SYSTEM_CONFIG.priorityTxMaxPubdata,

@@ -39,6 +39,7 @@ import { getCurrentFacetCutsForAdd } from "./diamondCut";
 
 import { ChainAdminFactory, ERC20Factory } from "../typechain";
 import type { Contract } from "@ethersproject/contracts";
+import { IChainAdminFactory } from "../typechain/IChainAdminFactory";
 
 let L2_BOOTLOADER_BYTECODE_HASH: string;
 let L2_DEFAULT_ACCOUNT_BYTECODE_HASH: string;
@@ -646,6 +647,15 @@ export class Deployer {
     this.addresses.StateTransition.GenesisUpgrade = contractAddress;
   }
 
+  public async deployNovaUpgrade(create2Salt: string, ethTxOptions: ethers.providers.TransactionRequest) {
+    ethTxOptions.gasLimit ??= 10_000_000;
+    const contractAddress = await this.deployViaCreate2("NovaUpgrade", [], create2Salt, ethTxOptions);
+
+    if (this.verbose) {
+      console.log(`CONTRACTS_HYPERCHAIN_UPGRADE_ADDR=${contractAddress}`);
+    }
+  }
+
   public async deployBridgehubContract(create2Salt: string, gasPrice?: BigNumberish, nonce?) {
     nonce = nonce ? parseInt(nonce) : await this.deployWallet.getTransactionCount();
 
@@ -933,6 +943,10 @@ export class Deployer {
 
   public governanceContract(signerOrProvider: Signer | providers.Provider) {
     return IGovernanceFactory.connect(this.addresses.Governance, signerOrProvider);
+  }
+
+  public chainAdmin(signerOrProvider: Signer | providers.Provider) {
+    return IChainAdminFactory.connect(this.addresses.ChainAdmin, signerOrProvider);
   }
 
   public validatorTimelock(signerOrProvider: Signer | providers.Provider) {
