@@ -3,7 +3,9 @@
 pragma solidity 0.8.20;
 
 import {IAccount, ACCOUNT_VALIDATION_SUCCESS_MAGIC} from "./interfaces/IAccount.sol";
-import {TransactionHelper, Transaction} from "./libraries/TransactionHelper.sol";
+import {IPasskeyBinder, SINGLE_TX_MAGIC, MULTI_TX_MAGIC} from "./interfaces/IPasskeyBinder.sol";
+import {TransactionHelper, Transaction, TransactionHashSturct, TRANSCATION_HASH_TYPEHASH, MULTI_TRANSACTION_TYPEHASH, EIP712_DOMAIN_TYPEHASH} from "./libraries/TransactionHelper.sol";
+import {PasskeyHelper, DecodedWebAuthnSignature} from "./libraries/PasskeyHelper.sol";
 import {SystemContractsCaller} from "./libraries/SystemContractsCaller.sol";
 import {SystemContractHelper} from "./libraries/SystemContractHelper.sol";
 import {EfficientCall} from "./libraries/EfficientCall.sol";
@@ -165,35 +167,87 @@ contract DefaultAccount is IAccount {
     /// @param _signature The signature of the transaction.
     /// @return EIP1271_SUCCESS_RETURN_VALUE if the signature is correct. It reverts otherwise.
     function _isValidSignature(bytes32 _hash, bytes memory _signature) internal view returns (bool) {
-        require(_signature.length == 65, "Signature length is incorrect");
-        uint8 v;
-        bytes32 r;
-        bytes32 s;
-        // Signature loading code
-        // we jump 32 (0x20) as the first slot of bytes contains the length
-        // we jump 65 (0x41) per signature
-        // for v we load 32 bytes ending with v (the first 31 come from s) then apply a mask
-        assembly {
-            r := mload(add(_signature, 0x20))
-            s := mload(add(_signature, 0x40))
-            v := and(mload(add(_signature, 0x41)), 0xff)
+        if (_signature.length == 65) {
+            uint8 v;
+            bytes32 r;
+            bytes32 s;
+            // Signature loading code
+            // we jump 32 (0x20) as the first slot of bytes contains the length
+            // we jump 65 (0x41) per signature
+            // for v we load 32 bytes ending with v (the first 31 come from s) then apply a mask
+            assembly {
+                r := mload(add(_signature, 0x20))
+                s := mload(add(_signature, 0x40))
+                v := and(mload(add(_signature, 0x41)), 0xff)
+            }
+            require(v == 27 || v == 28, "v is neither 27 nor 28");
+
+            // EIP-2 still allows signature malleability for ecrecover(). Remove this possibility and make the signature
+            // unique. Appendix F in the Ethereum Yellow paper (https://ethereum.github.io/yellowpaper/paper.pdf), defines
+            // the valid range for s in (301): 0 < s < secp256k1n ÷ 2 + 1, and for v in (302): v ∈ {27, 28}. Most
+            // signatures from current libraries generate a unique signature with an s-value in the lower half order.
+            //
+            // If your library generates malleable signatures, such as s-values in the upper range, calculate a new s-value
+            // with 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141 - s1 and flip v from 27 to 28 or
+            // vice versa. If your library also generates signatures with 0/1 for v instead 27/28, add 27 to v to accept
+            // these malleable signatures as well.
+            require(uint256(s) <= 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0, "Invalid s");
+
+            address recoveredAddress = ecrecover(_hash, v, r, s);
+
+            return recoveredAddress == address(this) && recoveredAddress != address(0);
+        } else if (_signature.length > 65) {
+            (bytes2 magicNum, address binderAddress, bytes32 keyIdHash, bytes memory passkeySignedInfo) = abi.decode(
+                _signature,
+                (bytes2, address, bytes32, bytes)
+            );
+            (uint256 x, uint256 y) = IPasskeyBinder(binderAddress).getKey(keyIdHash);
+            require(x != 0 && y != 0, "Passkey is not set");
+
+            if (magicNum == SINGLE_TX_MAGIC) {
+                DecodedWebAuthnSignature memory decodedSignature = PasskeyHelper.decodeWebAuthnP256Signature(
+                    passkeySignedInfo
+                );
+                return PasskeyHelper.verifyByP256Contract(_hash, decodedSignature, x, y);
+            } else if (magicNum == MULTI_TX_MAGIC) {
+                (
+                    bytes32 userOpsRootHash,
+                    bytes32 userOpDomainsRootHash,
+                    bytes memory txHashPrefix,
+                    bytes memory txHashSuffix,
+                    bytes memory passkeySignature
+                ) = abi.decode(passkeySignedInfo, (bytes32, bytes32, bytes, bytes, bytes));
+
+                bytes32 txRootHash = keccak256(
+                    abi.encodePacked(txHashPrefix, hash(TransactionHashSturct({txHash: _hash})), txHashSuffix)
+                );
+
+                bytes32 rootHashWithNonPrefix = keccak256(
+                    abi.encode(MULTI_TRANSACTION_TYPEHASH, txRootHash, userOpsRootHash, userOpDomainsRootHash)
+                );
+
+                bytes32 domainSeparator = keccak256(
+                    abi.encode(
+                        EIP712_DOMAIN_TYPEHASH,
+                        keccak256("ZKLink Nova Multi Transaction Validator"),
+                        keccak256("0.1.0"),
+                        block.chainid
+                    )
+                );
+                rootHash = keccak256(abi.encodePacked("\x19\x01", domainSeparator, rootHashWithNonPrefix));
+
+                DecodedWebAuthnSignature memory decodedSignature = PasskeyHelper.decodeWebAuthnP256Signature(
+                    passkeySignedInfo
+                );
+                return PasskeyHelper.verifyByP256Contract(rootHash, decodedSignature, x, y);
+            }
+        } else {
+            revert("Invalid signature length");
         }
-        require(v == 27 || v == 28, "v is neither 27 nor 28");
+    }
 
-        // EIP-2 still allows signature malleability for ecrecover(). Remove this possibility and make the signature
-        // unique. Appendix F in the Ethereum Yellow paper (https://ethereum.github.io/yellowpaper/paper.pdf), defines
-        // the valid range for s in (301): 0 < s < secp256k1n ÷ 2 + 1, and for v in (302): v ∈ {27, 28}. Most
-        // signatures from current libraries generate a unique signature with an s-value in the lower half order.
-        //
-        // If your library generates malleable signatures, such as s-values in the upper range, calculate a new s-value
-        // with 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141 - s1 and flip v from 27 to 28 or
-        // vice versa. If your library also generates signatures with 0/1 for v instead 27/28, add 27 to v to accept
-        // these malleable signatures as well.
-        require(uint256(s) <= 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0, "Invalid s");
-
-        address recoveredAddress = ecrecover(_hash, v, r, s);
-
-        return recoveredAddress == address(this) && recoveredAddress != address(0);
+    function hash(TransactionHashSturct memory txHashSturct) internal pure returns (bytes32) {
+        return keccak256(abi.encode(TRANSCATION_HASH_TYPEHASH, txHashSturct.txHash));
     }
 
     /// @notice Method for paying the bootloader for the transaction.
