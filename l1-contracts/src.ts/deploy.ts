@@ -946,7 +946,7 @@ export class Deployer {
   }
 
   public chainAdmin(signerOrProvider: Signer | providers.Provider) {
-    return IChainAdminFactory.connect(this.addresses.ChainAdmin, signerOrProvider);
+    return ChainAdminFactory.connect(this.addresses.ChainAdmin, signerOrProvider);
   }
 
   public validatorTimelock(signerOrProvider: Signer | providers.Provider) {
