@@ -239,10 +239,10 @@ contract DefaultAccount is IAccount {
                         block.chainid
                     )
                 );
-                rootHash = keccak256(abi.encodePacked("\x19\x01", domainSeparator, rootHashWithNonPrefix));
+                bytes32 rootHash = keccak256(abi.encodePacked("\x19\x01", domainSeparator, rootHashWithNonPrefix));
 
                 DecodedWebAuthnSignature memory decodedSignature = PasskeyHelper.decodeWebAuthnP256Signature(
-                    passkeySignedInfo
+                    passkeySignature
                 );
                 return PasskeyHelper.verifyByP256Contract(rootHash, decodedSignature, x, y);
             }
