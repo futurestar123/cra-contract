@@ -69,7 +69,7 @@ struct Transaction {
     bytes reservedDynamic;
 }
 
-sturct TransactionHashSturct {
+struct TransactionHashSturct {
     bytes32 txHash;
 }
 
@@ -89,9 +89,8 @@ library TransactionHelper {
             "Transaction(uint256 txType,uint256 from,uint256 to,uint256 gasLimit,uint256 gasPerPubdataByteLimit,uint256 maxFeePerGas,uint256 maxPriorityFeePerGas,uint256 paymaster,uint256 nonce,uint256 value,bytes data,bytes32[] factoryDeps,bytes paymasterInput)"
         );
 
-    bytes32 constant TRANSCATION_HASH_TYPEHASH =
-        keccak256("TransactionHash(bytes32 txHash)");
-    
+    bytes32 constant TRANSCATION_HASH_TYPEHASH = keccak256("TransactionHash(bytes32 txHash)");
+
     bytes32 constant MULTI_TRANSACTION_TYPEHASH =
         keccak256(
             "MultiTransaction(TransactionHash[] transactionHashes,UserOperationHash[] userOpHashes,ChainDomain[] userOpDomains)ChainDomain(string name,string version,uint256 chainId,address verifyingContract)TransactionHash(bytes32 txHash)UserOperationHash(bytes32 txHash)"

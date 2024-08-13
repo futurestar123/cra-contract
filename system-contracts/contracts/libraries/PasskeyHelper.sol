@@ -2,18 +2,25 @@
 
 pragma solidity 0.8.20;
 
-library PasskeyHelper {
-    struct DecodedWebAuthnSignature {
-        uint256 r;
-        uint256 s;
-        uint8 v;
-        bytes authenticatorData;
-        bool requireUserVerification;
-        string clientDataJSONPrefix;
-        string clientDataJSONSuffix;
-        uint256 responseTypeLocation;
-    }
+address constant REAL_P256VERIFY_CONTRACT_ADDRESS = 0x0000000000000000000000000000000000000100;
 
+//curve order (number of points)
+uint256 constant n = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551;
+
+uint256 constant P256_N_DIV_2 = n / 2;
+
+struct DecodedWebAuthnSignature {
+    uint256 r;
+    uint256 s;
+    uint8 v;
+    bytes authenticatorData;
+    bool requireUserVerification;
+    string clientDataJSONPrefix;
+    string clientDataJSONSuffix;
+    uint256 responseTypeLocation;
+}
+
+library PasskeyHelper {
     function decodeWebAuthnP256Signature(
         bytes memory _signature
     ) internal pure returns (DecodedWebAuthnSignature memory decodedSig) {
