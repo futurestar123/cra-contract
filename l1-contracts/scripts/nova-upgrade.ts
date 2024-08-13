@@ -6,7 +6,12 @@ import { Deployer } from "../src.ts/deploy";
 import { formatUnits, parseUnits } from "ethers/lib/utils";
 import { web3Provider, GAS_MULTIPLIER } from "./utils";
 import { deployedAddressesFromEnv } from "../src.ts/deploy-utils";
-import { novaUpgradeDeployment, novaUpgradeInitStage1, novaUpgradeInitStage2 } from "../src.ts/deploy-process";
+import {
+  novaUpgradeDeployment,
+  novaUpgradeInitStage1,
+  novaUpgradeInitStage2,
+  upgradeL1ERC20Bridge,
+} from "../src.ts/deploy-process";
 import { ethTestConfig, getAddressFromEnv } from "../src.ts/utils";
 
 const provider = web3Provider();
@@ -106,6 +111,35 @@ async function main() {
       });
 
       await novaUpgradeInitStage2(deployer, gasPrice, printOperation);
+    });
+
+  program
+    .command("upgrade-l1-erc20-bridge")
+    .option("--private-key <private-key>")
+    .option("--gas-price <gas-price>")
+    .option("--print-operation <print-operation>")
+    .action(async (cmd) => {
+      const deployWallet = cmd.privateKey
+        ? new Wallet(cmd.privateKey, provider)
+        : Wallet.fromMnemonic(
+            process.env.MNEMONIC ? process.env.MNEMONIC : ethTestConfig.mnemonic,
+            "m/44'/60'/0'/0/1"
+          ).connect(provider);
+      console.log(`Using deployer wallet: ${deployWallet.address}`);
+
+      const gasPrice = cmd.gasPrice
+        ? parseUnits(cmd.gasPrice, "gwei")
+        : (await provider.getGasPrice()).mul(GAS_MULTIPLIER);
+      console.log(`Using gas price: ${formatUnits(gasPrice, "gwei")} gwei`);
+
+      const printOperation = !!cmd.printOperation && cmd.printOperation === "true";
+
+      const deployer = new Deployer({
+        deployWallet,
+        verbose: true,
+      });
+
+      await upgradeL1ERC20Bridge(deployer, gasPrice, printOperation);
     });
 
   await program.parseAsync(process.argv);

@@ -11,6 +11,7 @@ import type { Deployer } from "./deploy";
 import { getTokens } from "./deploy-token";
 
 import { ADDRESS_ONE, DIAMOND_CUT_DATA_ABI_STRING, getAddressFromEnv } from "./utils";
+import { ITransparentUpgradeableProxyFactory } from "../typechain/ITransparentUpgradeableProxyFactory";
 
 export const L2_BOOTLOADER_BYTECODE_HASH = "0x1000100000000000000000000000000000000000000000000000000000000000";
 export const L2_DEFAULT_ACCOUNT_BYTECODE_HASH = "0x1001000000000000000000000000000000000000000000000000000000000000";
@@ -204,6 +205,17 @@ export async function novaUpgradeInitStage2(deployer: Deployer, gasPrice?: BigNu
     process.env.CONTRACTS_ERA_LEGACY_UPGRADE_LAST_DEPOSIT_TX_NUMBER,
   ]);
   await deployer.executeUpgrade(deployer.addresses.Bridges.SharedBridgeProxy, 0, calldata, gasPrice, printOperation);
+}
+
+export async function upgradeL1ERC20Bridge(deployer: Deployer, gasPrice?: BigNumberish, printOperation?: boolean) {
+  const l1ERC20BridgeProxy = ITransparentUpgradeableProxyFactory.connect(
+    deployer.addresses.Bridges.ERC20BridgeProxy,
+    deployer.deployWallet
+  );
+  const calldata = l1ERC20BridgeProxy.interface.encodeFunctionData("upgradeTo", [
+    deployer.addresses.Bridges.ERC20BridgeImplementation,
+  ]);
+  await deployer.executeUpgrade(deployer.addresses.Bridges.ERC20BridgeProxy, 0, calldata, gasPrice, printOperation);
 }
 
 export async function registerHyperchain(
