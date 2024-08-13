@@ -4,7 +4,7 @@ pragma solidity 0.8.20;
 
 import {IAccount, ACCOUNT_VALIDATION_SUCCESS_MAGIC} from "./interfaces/IAccount.sol";
 import {IPasskeyBinder, SINGLE_TX_MAGIC, MULTI_TX_MAGIC} from "./interfaces/IPasskeyBinder.sol";
-import {TransactionHelper, Transaction, TransactionHashSturct, TRANSCATION_HASH_TYPEHASH, MULTI_TRANSACTION_TYPEHASH, EIP712_DOMAIN_TYPEHASH} from "./libraries/TransactionHelper.sol";
+import {TransactionHelper, Transaction, TransactionHashSturct} from "./libraries/TransactionHelper.sol";
 import {PasskeyHelper, DecodedWebAuthnSignature} from "./libraries/PasskeyHelper.sol";
 import {SystemContractsCaller} from "./libraries/SystemContractsCaller.sol";
 import {SystemContractHelper} from "./libraries/SystemContractHelper.sol";
@@ -223,12 +223,17 @@ contract DefaultAccount is IAccount {
                 );
 
                 bytes32 rootHashWithNonPrefix = keccak256(
-                    abi.encode(MULTI_TRANSACTION_TYPEHASH, txRootHash, userOpsRootHash, userOpDomainsRootHash)
+                    abi.encode(
+                        TransactionHelper.MULTI_TRANSACTION_TYPEHASH,
+                        txRootHash,
+                        userOpsRootHash,
+                        userOpDomainsRootHash
+                    )
                 );
 
                 bytes32 domainSeparator = keccak256(
                     abi.encode(
-                        EIP712_DOMAIN_TYPEHASH,
+                        TransactionHelper.EIP712_DOMAIN_TYPEHASH,
                         keccak256("ZKLink Nova Multi Transaction Validator"),
                         keccak256("0.1.0"),
                         block.chainid
@@ -247,7 +252,7 @@ contract DefaultAccount is IAccount {
     }
 
     function hash(TransactionHashSturct memory txHashSturct) internal pure returns (bytes32) {
-        return keccak256(abi.encode(TRANSCATION_HASH_TYPEHASH, txHashSturct.txHash));
+        return keccak256(abi.encode(TransactionHelper.TRANSCATION_HASH_TYPEHASH, txHashSturct.txHash));
     }
 
     /// @notice Method for paying the bootloader for the transaction.
