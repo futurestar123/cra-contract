@@ -2,6 +2,8 @@
 
 pragma solidity 0.8.20;
 
+import {P256Utils} from "./P256Utils.sol";
+
 address constant REAL_P256VERIFY_CONTRACT_ADDRESS = 0x0000000000000000000000000000000000000100;
 
 //curve order (number of points)
